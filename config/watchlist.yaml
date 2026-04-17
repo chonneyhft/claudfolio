@@ -1,0 +1,15 @@
+# Watchlist for the Signal Fusion Engine.
+#
+# Fill in 10-15 tickers across 2-3 sectors you actively follow.
+# Each entry should follow the schema below.
+#
+# Example (uncomment and edit):
+# tickers:
+#   - ticker: LMT
+#     sector: industrials
+#     notes: "primary defense prime"
+#   - ticker: RTX
+#     sector: industrials
+#     notes: ""
+
+tickers: []

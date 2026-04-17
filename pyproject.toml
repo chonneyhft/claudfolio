@@ -1,0 +1,55 @@
+[project]
+name = "sfe"
+version = "0.1.0"
+description = "Signal Fusion Engine — multi-signal fusion for a daily pre-market briefing."
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "loguru>=0.7",
+    "httpx>=0.27",
+    "sqlalchemy>=2.0",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "textblob>=0.18",
+]
+
+[project.scripts]
+sfe = "src.pipeline:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+sentiment-ml = [
+    "transformers>=4.44",
+    "torch>=2.3",
+]
+quant = [
+    "scikit-learn>=1.5",
+    "xgboost>=2.1",
+    "yfinance>=0.2",
+]
+llm = [
+    "anthropic>=0.40",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
