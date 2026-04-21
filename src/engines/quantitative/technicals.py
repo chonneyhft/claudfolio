@@ -86,7 +86,7 @@ def compute_indicators(ohlcv: list[dict]) -> dict[str, Any]:
     sma_50 = close.rolling(50).mean().iloc[-1] if len(close) >= 50 else np.nan
     sma_200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else np.nan
 
-    vol_avg = volume.rolling(VOLUME_WINDOW).mean().iloc[-2] if len(volume) > VOLUME_WINDOW else np.nan
+    vol_avg = volume.rolling(VOLUME_WINDOW).mean().iloc[-1] if len(volume) >= VOLUME_WINDOW else np.nan
     vol_ratio = (
         round(float(volume.iloc[-1] / vol_avg), 2)
         if not pd.isna(vol_avg) and vol_avg > 0

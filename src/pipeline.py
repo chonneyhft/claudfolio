@@ -79,7 +79,7 @@ def run_quant(args: argparse.Namespace) -> int:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(engine)
 
-    on_date = Date.fromisoformat(args.date) if args.date else Date.today()
+    as_of = Date.fromisoformat(args.date) if args.date else Date.today()
 
     watchlist = load_watchlist()
     if args.ticker:
@@ -101,7 +101,7 @@ def run_quant(args: argparse.Namespace) -> int:
         for entry in entries:
             ticker = entry["ticker"]
             try:
-                payload = aggregate(ticker, on_date, sector=entry.get("sector"))
+                payload = aggregate(ticker, as_of, sector=entry.get("sector"))
             except Exception as exc:
                 logger.exception(f"{ticker}: quant aggregate failed: {exc}")
                 continue
@@ -109,7 +109,7 @@ def run_quant(args: argparse.Namespace) -> int:
             logger.info(
                 "{ticker} {date}: close={close} rsi={rsi} health={health}",
                 ticker=ticker,
-                date=on_date,
+                date=as_of,
                 close=payload["close"],
                 rsi=payload["rsi_14"],
                 health=payload["health_score"],

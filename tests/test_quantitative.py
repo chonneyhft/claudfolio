@@ -8,7 +8,9 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from src.engines.quantitative import aggregator, model, technicals
+import pandas as pd
+
+from src.engines.quantitative import aggregator, model, price_fetcher, technicals
 from src.storage.models import Base, QuantDaily
 from src.storage.quant_repo import upsert_quant_daily
 
@@ -36,6 +38,41 @@ def _series(closes: list[float], volumes: list[int] | None = None) -> list[dict]
         }
         for i, c in enumerate(closes)
     ]
+
+
+class TestFetchOhlcvAsOfContract:
+    def test_fetch_ohlcv_excludes_as_of_bar(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """as_of contract: the as_of bar itself must NOT be returned."""
+        captured: dict = {}
+
+        def fake_download(ticker: str, **kwargs) -> pd.DataFrame:
+            captured.update(kwargs)
+            idx = pd.to_datetime(
+                ["2024-06-12", "2024-06-13", "2024-06-14"]
+            )
+            return pd.DataFrame(
+                {
+                    "Open": [1.0, 1.0, 1.0],
+                    "High": [1.0, 1.0, 1.0],
+                    "Low": [1.0, 1.0, 1.0],
+                    "Close": [1.0, 1.0, 1.0],
+                    "Volume": [1, 1, 1],
+                },
+                index=idx,
+            )
+
+        monkeypatch.setattr(price_fetcher.yf, "download", fake_download)
+        rows = price_fetcher.fetch_ohlcv("AAPL", date(2024, 6, 17))
+
+        # end argument passed to yfinance must equal as_of itself (exclusive),
+        # not as_of + 1 day.
+        assert captured["end"] == "2024-06-17"
+        assert rows, "expected non-empty OHLCV history"
+        last_bar = rows[-1]["date"]
+        assert last_bar < date(2024, 6, 17), (
+            f"look-ahead bias: latest bar {last_bar} should be < as_of"
+        )
+        assert last_bar == date(2024, 6, 14)
 
 
 class TestComputeIndicators:
@@ -67,11 +104,16 @@ class TestComputeIndicators:
         assert out["above_50sma"] is False
         assert "bearish" in out["macd_signal"]
 
-    def test_volume_ratio_uses_prior_20d_window(self) -> None:
+    def test_volume_ratio_uses_20d_window(self) -> None:
+        # Under the as-of contract, iloc[-1] is the most recent legitimate bar
+        # (yesterday). The ratio compares that bar's volume to the 20-day
+        # rolling mean through that same bar.
         closes = [100.0] * 25
-        volumes = [1_000_000] * 24 + [2_000_000]  # last day doubles
+        volumes = [1_000_000] * 24 + [2_000_000]  # last bar doubles
         out = technicals.compute_indicators(_series(closes, volumes))
-        assert out["volume_vs_20d_avg"] == pytest.approx(2.0, abs=0.01)
+        # rolling(20).mean over the last 20 bars = (19 * 1M + 2M) / 20 = 1.05M
+        # ratio = 2.0M / 1.05M ≈ 1.9047
+        assert out["volume_vs_20d_avg"] == pytest.approx(1.9, abs=0.01)
 
     def test_unsorted_input_is_sorted(self) -> None:
         rows = _series([i * 1.0 for i in range(60)])
@@ -111,7 +153,7 @@ class TestAggregate:
         ticker_rows = _series([100.0 + i * 0.3 for i in range(60)])
         etf_rows = _series([50.0 + i * 0.05 for i in range(30)])
 
-        def fake_fetch(sym: str, end_date: date, days: int = 300) -> list[dict]:
+        def fake_fetch(sym: str, as_of: date, days: int = 300) -> list[dict]:
             return etf_rows if sym == "XLK" else ticker_rows
 
         monkeypatch.setattr(aggregator.price_fetcher, "fetch_ohlcv", fake_fetch)
@@ -145,7 +187,7 @@ class TestAggregate:
     ) -> None:
         ticker_rows = _series([100.0 + i for i in range(30)])
 
-        def fake_fetch(sym: str, end_date: date, days: int = 300) -> list[dict]:
+        def fake_fetch(sym: str, as_of: date, days: int = 300) -> list[dict]:
             if sym == "XLK":
                 raise RuntimeError("ETF fetch down")
             return ticker_rows

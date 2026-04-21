@@ -28,14 +28,14 @@ SECTOR_ETF: dict[str, str] = {
 def _sector_relative(
     ticker_ohlcv: list[dict],
     sector: str | None,
-    on_date: date,
+    as_of: date,
 ) -> dict[str, Any]:
     etf = SECTOR_ETF.get(sector or "")
     if not etf or len(ticker_ohlcv) < 6:
         return {"sector_etf": etf, "relative_return_5d": None}
 
     try:
-        etf_ohlcv = price_fetcher.fetch_ohlcv(etf, on_date, days=30)
+        etf_ohlcv = price_fetcher.fetch_ohlcv(etf, as_of, days=30)
     except Exception as exc:
         logger.warning(f"sector ETF {etf} fetch failed: {exc}")
         return {"sector_etf": etf, "relative_return_5d": None}
@@ -51,7 +51,7 @@ def _sector_relative(
 
 def aggregate(
     ticker: str,
-    on_date: date,
+    as_of: date,
     *,
     sector: str | None = None,
 ) -> dict[str, Any]:
@@ -62,17 +62,17 @@ def aggregate(
     ``pipeline.py`` catch and log per-ticker so one bad ticker doesn't blank
     the run.
     """
-    ohlcv = price_fetcher.fetch_ohlcv(ticker, on_date)
+    ohlcv = price_fetcher.fetch_ohlcv(ticker, as_of)
     if not ohlcv:
         raise RuntimeError(f"no OHLCV data returned for {ticker}")
 
     indicators = technicals.compute_indicators(ohlcv)
     health = model.predict_health(indicators)
-    sector_rel = _sector_relative(ohlcv, sector, on_date)
+    sector_rel = _sector_relative(ohlcv, sector, as_of)
 
     return {
         "ticker": ticker,
-        "date": on_date.isoformat(),
+        "date": as_of.isoformat(),
         "close": indicators["close"],
         "change_1d": indicators["change_1d"],
         "change_5d": indicators["change_5d"],
