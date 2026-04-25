@@ -35,3 +35,46 @@ Shipped with earnings engine PR. `_bootstrap_db()`, `_parse_date()`, `_resolve_t
 **Effort:** S (human ~2 hrs / CC ~15 min)
 **Depends on:** Nothing. Existing enrichment data works for week 1.
 **Context:** Accepted scope from CEO review, deferred from Sunday must-have. Build when first briefs expose the gap.
+
+---
+
+## Improvement backlog
+
+Captured from a whole-project review (2026-04-19); not yet scheduled. Ordered within each engine by rough signal-quality impact.
+
+### Sentiment
+- Promote FinBERT to default scorer; retire TextBlob after spot-checking a week of rows. Single biggest quality lever.
+- Split `sec_filings` weight into `sec_8k` vs `sec_periodic` (8-Ks carry more event signal than 10-K/10-Q front matter). Cheaper than MD&A section parsing.
+- Dedup Finnhub + finlight articles before `weighted_rollup` (hash on normalized title + publisher) so wire-service reprints don't double-count.
+- Either populate `key_topics` (top TF-IDF tokens across the day's headlines) or remove the field from the schema and prompt.
+
+### Quantitative
+- Replace binary-vote `predict_health` with a z-score composite per indicator so magnitude/regime matter (no ML required).
+- Pin the GBT label definition now (forward 5d return vs sector? Sharpe over N days?) so accumulated scorecards are trainable later.
+- Add SPY-relative return alongside sector-relative; divergence between the two is itself a signal.
+- Add a volatility feature (ATR or realized vol) so the meta-layer can weight a 5% move by the name's typical range.
+
+### Enrichment
+- Insider summary: weight by net dollar value and insider role (CEO/CFO vs 10%-holder), not just P/S code counts.
+- Analyst revisions: weight the latest revision heavier than MoM aggregate; use firm name if exposed.
+- Add a post-earnings-drift flag ("earnings N days ago, stock ±X%") to the payload.
+- Pull FRED FOMC/CPI macro calendar forward from the deferred list — free, low-effort, meta-layer currently has no macro context.
+
+### Meta layer
+- Feed yesterday's briefing (or a tier-change diff) into the prompt so Claude can reference prior calls instead of cold-starting each morning.
+- Add a `briefing_outcomes` table for manual post-hoc right/wrong marking. Unblocks threshold tuning and eventually provides GBT labels.
+- Broad-market context block (SPY/QQQ/VIX + upcoming FOMC/CPI) — worth prioritizing because high-conviction calls on risk-off days should be downgraded.
+
+### Cross-cutting
+- `config/sources.yaml` weights are currently guesses and are the most important tuning knob. Backtest weight variants against forward returns once a few weeks of rows accumulate.
+- Add a response cache layer on Finnhub fetchers keyed by (ticker, date), mirroring the in-process EDGAR body cache.
+
+### Deferred features
+- GBT technical-health model (xgboost) — train once enough daily scorecards accumulate.
+- Short interest (FINRA bimonthly file).
+- Congressional trades (Quiver Quant free tier, 45-day lag).
+- Options flow (Unusual Whales, paid).
+- EDGAR MD&A section targeting for 10-K/10-Q.
+- Backtesting framework.
+- Email/Slack delivery.
+- Historical comparison anchor in earnings briefs — needs prior outcome data first.
