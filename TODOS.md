@@ -29,12 +29,8 @@ Shipped with earnings engine PR. `_bootstrap_db()`, `_parse_date()`, `_resolve_t
 **Depends on:** Earnings calendar widget + sector mapping from watchlist.yaml.
 **Context:** Brief is already data-rich without it. Add after pilot cadence is established.
 
-## P3 — Insider/analyst windowing (30-day pre-print)
-**What:** Window insider trades and analyst revisions to 30 days before earnings_date instead of using whatever's in the DB.
-**Why:** Focuses the signal on pre-print activity, which is more predictive than a generic 30-day lookback from today.
-**Effort:** S (human ~2 hrs / CC ~15 min)
-**Depends on:** Nothing. Existing enrichment data works for week 1.
-**Context:** Accepted scope from CEO review, deferred from Sunday must-have. Build when first briefs expose the gap.
+## ~~P3 — Insider/analyst windowing (30-day pre-print)~~ DONE (2026-04-25)
+Enrichment aggregator now auto-detects `earnings_date` from the calendar and windows insider trades to 30 days before earnings. Analyst revisions filtered to pre-earnings periods.
 
 ---
 
@@ -45,7 +41,7 @@ Captured from a whole-project review (2026-04-19); not yet scheduled. Ordered wi
 ### Sentiment
 - ~~Promote FinBERT to default scorer; retire TextBlob after spot-checking a week of rows.~~ DONE (2026-04-25). FinBERT is now default; TextBlob is fallback when sentiment-ml deps missing.
 - Split `sec_filings` weight into `sec_8k` vs `sec_periodic` (8-Ks carry more event signal than 10-K/10-Q front matter). Cheaper than MD&A section parsing.
-- Dedup Finnhub + finlight articles before `weighted_rollup` (hash on normalized title + publisher) so wire-service reprints don't double-count.
+- ~~Dedup Finnhub + finlight articles before `weighted_rollup` so wire-service reprints don't double-count.~~ DONE (2026-04-25). Normalized-headline dedup in `_dedup_articles()` before rollup.
 - Either populate `key_topics` (top TF-IDF tokens across the day's headlines) or remove the field from the schema and prompt.
 
 ### Quantitative
