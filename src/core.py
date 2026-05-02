@@ -212,6 +212,170 @@ def log_outcome(data: dict[str, Any], session: Session) -> None:
     )
 
 
+def log_signal(data: dict[str, Any], session: Session) -> None:
+    from src.storage.signal_repo import upsert_signal_daily
+
+    upsert_signal_daily(session, data)
+    logger.info(
+        "logged signal: {ticker} {date} → {dir} ({conv:.0%})",
+        ticker=data["ticker"],
+        date=data["as_of"],
+        dir=data["direction"],
+        conv=data["conviction"],
+    )
+
+
+def run_signals(
+    on_date: Date,
+    session: Session,
+) -> dict[str, list[dict[str, Any]]]:
+    """Run all 3 engines for the full watchlist. No Claude call."""
+    from src.config import load_watchlist
+
+    watchlist = load_watchlist()
+    tickers = [t["ticker"] for t in watchlist]
+    if not tickers:
+        logger.error("watchlist is empty — fill config/watchlist.yaml")
+        return {"sentiment": [], "quant": [], "enrichment": []}
+
+    logger.info("run-signals: {n} tickers on {d}", n=len(tickers), d=on_date)
+
+    sentiment = run_sentiment(tickers, on_date, session)
+    quant = run_quant(watchlist, on_date, session)
+    enrichment = run_enrichment(tickers, on_date, session)
+
+    logger.info(
+        "run-signals complete: {s} sentiment, {q} quant, {e} enrichment rows",
+        s=len([r for r in sentiment if "error" not in r]),
+        q=len([r for r in quant if "error" not in r]),
+        e=len([r for r in enrichment if "error" not in r]),
+    )
+    return {"sentiment": sentiment, "quant": quant, "enrichment": enrichment}
+
+
+def generate_signals(
+    on_date: Date,
+    session: Session,
+) -> list[dict[str, Any]]:
+    """Read engine outputs, call Claude to reason about each ticker, log signals."""
+    import json
+
+    from src.meta.llm_client import generate_briefing
+    from src.meta.payload_builder import build_payload
+
+    payload = build_payload(session, on_date)
+    tickers_with_data = [
+        t for t in payload["tickers"]
+        if t.get("sentiment") or t.get("quant") or t.get("enrichment")
+    ]
+
+    if not tickers_with_data:
+        logger.warning("no engine data found for any ticker on {d}", d=on_date)
+        return []
+
+    prompt_path = Path(__file__).resolve().parent / "meta" / "prompts" / "signal_generation.txt"
+    system_prompt = prompt_path.read_text()
+
+    logger.info(
+        "generate-signals: calling Claude for {n} tickers on {d}",
+        n=len(tickers_with_data),
+        d=on_date,
+    )
+    raw = generate_briefing(payload, system_prompt=system_prompt, model="claude-sonnet-4-6")
+
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[1]
+        if cleaned.endswith("```"):
+            cleaned = cleaned.rsplit("```", 1)[0]
+        cleaned = cleaned.strip()
+
+    signals = json.loads(cleaned)
+
+    logged: list[dict[str, Any]] = []
+    for sig in signals:
+        direction = sig.get("direction", "neutral")
+        if direction not in ("bullish", "bearish", "neutral"):
+            direction = "neutral"
+        dominant = sig.get("dominant_component", "convergence")
+        if dominant not in ("sentiment", "quant", "enrichment", "convergence"):
+            dominant = "convergence"
+
+        data = {
+            "ticker": sig["ticker"].upper(),
+            "as_of": on_date,
+            "direction": direction,
+            "conviction": max(0.0, min(1.0, float(sig.get("conviction", 0.5)))),
+            "dominant_component": dominant,
+            "reasoning": sig.get("reasoning", ""),
+            "entry_price": sig.get("entry_price"),
+            "signal_components": {},
+        }
+        log_signal(data, session)
+        logged.append(data)
+
+    return logged
+
+
+def score_signals(
+    session: Session,
+    on_date: Date | None = None,
+) -> list[dict[str, Any]]:
+    from src.tracking.scorer import compute_stats, score_all
+
+    on_date = on_date or Date.today()
+    scored = score_all(session, on_date)
+    stats = compute_stats(scored)
+
+    logger.info(
+        "scoring complete: {n} signals scored, 5d EV={ev}",
+        n=stats["total_signals"],
+        ev=stats["by_horizon"].get("5d", {}).get("ev", "n/a"),
+    )
+    return scored
+
+
+def render_dashboard(
+    session: Session,
+    on_date: Date | None = None,
+    output_path: str | None = None,
+) -> str:
+    from pathlib import Path
+
+    from src.tracking.dashboard import render
+
+    path = Path(output_path) if output_path else None
+    result = render(session, on_date, path)
+    return str(result)
+
+
+def run_agent(
+    on_date: Date,
+    session: Session,
+    *,
+    model: str = "claude-sonnet-4-6",
+    portfolio_name: str = "default",
+    starting_equity: float = 100_000.0,
+) -> dict[str, Any]:
+    """Run the agentic portfolio harness for one day."""
+    from src.agent.harness import run_agent as _run_agent
+
+    logger.info("run-agent: {d} (portfolio={p})", d=on_date, p=portfolio_name)
+    result = _run_agent(
+        session,
+        on_date,
+        model=model,
+        portfolio_name=portfolio_name,
+        starting_equity=starting_equity,
+    )
+    logger.info(
+        "run-agent: {d} decisions, equity ${eq:,.2f}",
+        d=result["decisions_made"],
+        eq=result["snapshot_after"]["equity"],
+    )
+    return result
+
+
 def get_ticker_summary(
     ticker: str,
     on_date: Date,

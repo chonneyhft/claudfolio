@@ -211,6 +211,133 @@ def earnings_calendar(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_log_signal(args: argparse.Namespace) -> int:
+    from src.core import log_signal as _log
+
+    session = _bootstrap_db()
+    data = {
+        "ticker": args.ticker.upper(),
+        "as_of": Date.fromisoformat(args.as_of) if args.as_of else Date.today(),
+        "direction": args.direction,
+        "conviction": float(args.conviction),
+        "dominant_component": args.dominant_component,
+        "reasoning": args.reasoning,
+        "entry_price": float(args.entry_price) if args.entry_price else None,
+        "signal_components": {},
+    }
+    try:
+        _log(data, session)
+    finally:
+        session.close()
+    return 0
+
+
+def cmd_run_signals(args: argparse.Namespace) -> int:
+    from src.core import run_signals as _run
+
+    session = _bootstrap_db()
+    on_date = _parse_date(args)
+    try:
+        results = _run(on_date, session)
+    finally:
+        session.close()
+
+    ok = sum(
+        1 for engine in results.values()
+        for r in engine
+        if "error" not in r
+    )
+    errs = sum(
+        1 for engine in results.values()
+        for r in engine
+        if "error" in r
+    )
+    print(f"Done: {ok} successful, {errs} errors")
+    return 1 if ok == 0 else 0
+
+
+def cmd_generate_signals(args: argparse.Namespace) -> int:
+    from src.core import generate_signals
+
+    session = _bootstrap_db()
+    on_date = _parse_date(args)
+    try:
+        signals = generate_signals(on_date, session)
+    except Exception as exc:
+        logger.error("Signal generation failed: {exc}", exc=exc)
+        return 1
+    finally:
+        session.close()
+
+    for s in signals:
+        print(f"  {s['ticker']}: {s['direction']} ({s['conviction']:.0%}) — {s['reasoning'][:80]}")
+    print(f"\nLogged {len(signals)} signals")
+    return 0
+
+
+def cmd_score_signals(args: argparse.Namespace) -> int:
+    from src.core import score_signals
+
+    session = _bootstrap_db()
+    on_date = _parse_date(args)
+    try:
+        scored = score_signals(session, on_date)
+    finally:
+        session.close()
+    print(f"Scored {len(scored)} signals")
+    return 0
+
+
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    from src.core import render_dashboard
+
+    session = _bootstrap_db()
+    on_date = _parse_date(args)
+    try:
+        path = render_dashboard(session, on_date, args.output)
+    finally:
+        session.close()
+    print(f"Dashboard written to {path}")
+    return 0
+
+
+def cmd_run_agent(args: argparse.Namespace) -> int:
+    from src.core import run_agent
+
+    session = _bootstrap_db()
+    on_date = _parse_date(args)
+    try:
+        result = run_agent(
+            on_date,
+            session,
+            model=args.model,
+            portfolio_name=args.portfolio,
+            starting_equity=float(args.starting_equity),
+        )
+    except Exception as exc:
+        logger.exception(f"agent run failed: {exc}")
+        return 1
+    finally:
+        session.close()
+
+    snap = result["snapshot_after"]
+    print(f"\n{'='*60}")
+    print(f"Agent run complete — {on_date.isoformat()}")
+    print(f"  Decisions: {result['decisions_made']}")
+    print(f"  Equity:    ${snap['equity']:,.2f}")
+    print(f"  Cash:      ${snap['cash']:,.2f}")
+    print(f"  Positions: {snap['position_count']}")
+    print(f"  Return:    {snap['total_return_pct']:+.2f}%")
+    print(f"{'='*60}")
+
+    for pos in snap["positions"]:
+        pnl = pos["unrealized_pnl"]
+        sign = "+" if pnl >= 0 else ""
+        print(f"  {pos['ticker']:6s}  {pos['direction']:5s}  {pos['shares']:>8.2f} shares  "
+              f"${pos['current_price']:>9.2f}  {sign}${pnl:,.2f}")
+    return 0
+
+
 def run_all(args: argparse.Namespace) -> int:
     logger.info("full pipeline: not yet implemented")
     return 0
@@ -272,6 +399,47 @@ def build_parser() -> argparse.ArgumentParser:
     p_cal = subs.add_parser("earnings-calendar", help="Show upcoming earnings for watchlist")
     p_cal.add_argument("--date", help="ISO date (YYYY-MM-DD); defaults to today")
     p_cal.set_defaults(func=earnings_calendar)
+
+    p_ls = subs.add_parser("log-signal", help="Log a directional signal for the experiment")
+    p_ls.add_argument("--ticker", required=True, help="Ticker symbol")
+    p_ls.add_argument(
+        "--direction", required=True, choices=["bullish", "bearish", "neutral"],
+        help="Directional call",
+    )
+    p_ls.add_argument("--conviction", required=True, help="Conviction score 0.0-1.0")
+    p_ls.add_argument(
+        "--dominant-component", required=True,
+        choices=["sentiment", "quant", "enrichment", "convergence"],
+        help="Which engine drove this call",
+    )
+    p_ls.add_argument("--reasoning", required=True, help="One-line reasoning for the call")
+    p_ls.add_argument("--entry-price", help="Entry price at signal time")
+    p_ls.add_argument("--as-of", help="Signal date (YYYY-MM-DD); defaults to today")
+    p_ls.set_defaults(func=cmd_log_signal)
+
+    p_rs = subs.add_parser("run-signals", help="Run all engines for the full watchlist")
+    p_rs.add_argument("--date", help="ISO date (YYYY-MM-DD); defaults to today")
+    p_rs.set_defaults(func=cmd_run_signals)
+
+    p_gs = subs.add_parser("generate-signals", help="Run Claude meta-layer to generate directional signals")
+    p_gs.add_argument("--date", help="ISO date (YYYY-MM-DD); defaults to today")
+    p_gs.set_defaults(func=cmd_generate_signals)
+
+    p_sc = subs.add_parser("score-signals", help="Score matured signals against outcomes")
+    p_sc.add_argument("--date", help="ISO date (YYYY-MM-DD); defaults to today")
+    p_sc.set_defaults(func=cmd_score_signals)
+
+    p_dash = subs.add_parser("dashboard", help="Render the experiment dashboard HTML")
+    p_dash.add_argument("--date", help="ISO date (YYYY-MM-DD); defaults to today")
+    p_dash.add_argument("--output", help="Output file path (default: output/dashboard.html)")
+    p_dash.set_defaults(func=cmd_dashboard)
+
+    p_agent = subs.add_parser("run-agent", help="Run the agentic portfolio manager")
+    p_agent.add_argument("--date", help="ISO date (YYYY-MM-DD); defaults to today")
+    p_agent.add_argument("--model", default="claude-sonnet-4-6", help="Claude model to use (default: claude-sonnet-4-6)")
+    p_agent.add_argument("--portfolio", default="default", help="Portfolio name (default: default)")
+    p_agent.add_argument("--starting-equity", default="100000", help="Starting equity for new portfolios (default: 100000)")
+    p_agent.set_defaults(func=cmd_run_agent)
 
     subs.add_parser("run-all", help="Run the full pipeline end to end").set_defaults(func=run_all)
     return parser
