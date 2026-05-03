@@ -10,9 +10,10 @@ import json
 from datetime import date as Date
 from typing import Any
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.storage.models import Portfolio
+from src.storage.models import EnrichmentDaily, Portfolio, QuantDaily, SentimentDaily
 from src.storage.portfolio_repo import (
     close_position,
     get_position,
@@ -162,6 +163,79 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "required": [],
         },
     },
+    {
+        "name": "investigate_sentiment",
+        "description": (
+            "Investigate sentiment for a ticker. In summary mode, returns the cached daily "
+            "sentiment data. In deep mode, launches a sentiment analyst sub-agent that can "
+            "fetch live news, SEC filings, and score text to answer your specific question."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {
+                    "type": "string",
+                    "description": "Ticker symbol (e.g. NVDA)",
+                },
+                "question": {
+                    "type": "string",
+                    "description": "What you want to understand — only used in deep mode",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["summary", "deep"],
+                    "description": "summary = cached data only (fast, no API calls); deep = live investigation via sub-agent",
+                },
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
+        "name": "get_quant_detail",
+        "description": (
+            "Get quantitative/technical analysis for a ticker. Default returns cached daily data. "
+            "With depth=full, fetches live price data and computes fresh technicals, "
+            "sector-relative performance, and a 20-day price table."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {
+                    "type": "string",
+                    "description": "Ticker symbol (e.g. NVDA)",
+                },
+                "depth": {
+                    "type": "string",
+                    "enum": ["standard", "full"],
+                    "description": "standard = cached DB row; full = live OHLCV + fresh technicals",
+                },
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
+        "name": "get_enrichment_detail",
+        "description": (
+            "Get enrichment data (insider trades, analyst activity, earnings) for a ticker. "
+            "Default returns cached daily data. With depth=full, fetches live data with "
+            "full insider trade details and analyst revision timeline."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {
+                    "type": "string",
+                    "description": "Ticker symbol (e.g. NVDA)",
+                },
+                "depth": {
+                    "type": "string",
+                    "enum": ["standard", "full"],
+                    "description": "standard = cached DB row; full = live insider/analyst/earnings with full detail",
+                },
+            },
+            "required": ["ticker"],
+        },
+    },
 ]
 
 
@@ -211,6 +285,9 @@ def execute_tool(ctx: ToolContext, tool_name: str, tool_input: dict[str, Any]) -
         "close_position": _exec_close_position,
         "resize_position": _exec_resize_position,
         "get_trade_history": _exec_get_trade_history,
+        "investigate_sentiment": _exec_investigate_sentiment,
+        "get_quant_detail": _exec_get_quant_detail,
+        "get_enrichment_detail": _exec_get_enrichment_detail,
     }
     handler = handlers.get(tool_name)
     if handler is None:
@@ -398,4 +475,153 @@ def _exec_get_trade_history(ctx: ToolContext, inp: dict) -> dict:
             }
             for t in trades
         ]
+    }
+
+
+# ---------------------------------------------------------------------------
+# New tools: investigate_sentiment, get_quant_detail, get_enrichment_detail
+# ---------------------------------------------------------------------------
+
+
+def _exec_investigate_sentiment(ctx: ToolContext, inp: dict) -> dict:
+    from src.meta.payload_builder import _latest, _sentiment_view
+
+    ticker = inp["ticker"].upper()
+    mode = inp.get("mode", "summary")
+
+    if mode == "summary":
+        row = _latest(ctx.session, SentimentDaily, ticker, ctx.trade_date)
+        view = _sentiment_view(row)
+        if view is None:
+            return {"error": f"No cached sentiment data for {ticker} as of {ctx.trade_date}"}
+        return {"ticker": ticker, "mode": "summary", **view}
+
+    from src.agent.sub_agents.sentiment import SentimentSubAgent
+
+    question = inp.get("question", f"Analyze the current sentiment landscape for {ticker}.")
+    agent = SentimentSubAgent(ctx.session, ctx.trade_date)
+    user_msg = f"Deep investigation for {ticker}: {question}"
+
+    logger.info("sub-agent: launching sentiment investigation for {t}", t=ticker)
+    result = agent.run(user_msg)
+    logger.info(
+        "sub-agent: sentiment done for {t} in {n} turns ({it} in / {ot} out tokens)",
+        t=ticker,
+        n=len(result.trace),
+        it=result.token_usage.get("input_tokens", 0),
+        ot=result.token_usage.get("output_tokens", 0),
+    )
+
+    return {
+        "ticker": ticker,
+        "mode": "deep",
+        "analysis": result.answer,
+        "sub_agent_trace": result.trace,
+        "tokens_used": result.token_usage,
+    }
+
+
+def _exec_get_quant_detail(ctx: ToolContext, inp: dict) -> dict:
+    from src.meta.payload_builder import _latest, _quant_view
+
+    ticker = inp["ticker"].upper()
+    depth = inp.get("depth", "standard")
+
+    if depth == "standard":
+        row = _latest(ctx.session, QuantDaily, ticker, ctx.trade_date)
+        view = _quant_view(row)
+        if view is None:
+            return {"error": f"No cached quant data for {ticker} as of {ctx.trade_date}"}
+        return {"ticker": ticker, "depth": "standard", **view}
+
+    from src.config import load_watchlist
+    from src.engines.quantitative import model, price_fetcher, technicals
+    from src.engines.quantitative.aggregator import _sector_relative
+
+    sector = None
+    for entry in load_watchlist():
+        if entry["ticker"].upper() == ticker:
+            sector = entry.get("sector")
+            break
+
+    ohlcv = price_fetcher.fetch_ohlcv(ticker, ctx.trade_date)
+    if not ohlcv:
+        return {"error": f"No OHLCV data returned for {ticker}"}
+
+    indicators = technicals.compute_indicators(ohlcv)
+    health = model.predict_health(indicators)
+    sector_rel = _sector_relative(ohlcv, sector, ctx.trade_date)
+
+    price_table = [
+        {"date": bar["date"].isoformat() if hasattr(bar["date"], "isoformat") else str(bar["date"]),
+         "close": round(bar["close"], 2),
+         "volume": bar["volume"]}
+        for bar in ohlcv[-20:]
+    ]
+
+    return {
+        "ticker": ticker,
+        "depth": "full",
+        **indicators,
+        "health_score": health,
+        **sector_rel,
+        "price_table_20d": price_table,
+    }
+
+
+def _exec_get_enrichment_detail(ctx: ToolContext, inp: dict) -> dict:
+    from src.meta.payload_builder import _latest, _enrichment_view
+
+    ticker = inp["ticker"].upper()
+    depth = inp.get("depth", "standard")
+
+    if depth == "standard":
+        row = _latest(ctx.session, EnrichmentDaily, ticker, ctx.trade_date)
+        view = _enrichment_view(row)
+        if view is None:
+            return {"error": f"No cached enrichment data for {ticker} as of {ctx.trade_date}"}
+        return {"ticker": ticker, "depth": "standard", **view}
+
+    from src.engines.enrichment import analyst_revisions, event_calendar, insider_trades
+
+    events_block: dict[str, Any]
+    try:
+        events = event_calendar.fetch_earnings(ticker, ctx.trade_date)
+        events_block = event_calendar.summarize(events, ctx.trade_date)
+    except Exception as exc:
+        logger.warning(f"{ticker}: earnings calendar fetch failed: {exc}")
+        events_block = event_calendar.summarize([], ctx.trade_date)
+
+    earnings_date = None
+    if events_block["next_earnings"]:
+        try:
+            from datetime import date
+            earnings_date = date.fromisoformat(events_block["next_earnings"]["date"])
+        except (ValueError, KeyError):
+            pass
+
+    insider_block: dict[str, Any]
+    try:
+        insider_end = earnings_date if earnings_date else ctx.trade_date
+        txns = insider_trades.fetch_transactions(ticker, insider_end)
+        insider_block = insider_trades.summarize(txns)
+    except Exception as exc:
+        logger.warning(f"{ticker}: insider fetch failed: {exc}")
+        insider_block = insider_trades.summarize([])
+
+    analyst_block: dict[str, Any]
+    try:
+        recs = analyst_revisions.fetch_recommendations(ticker)
+        analyst_block = analyst_revisions.summarize(recs, before_date=earnings_date)
+    except Exception as exc:
+        logger.warning(f"{ticker}: analyst fetch failed: {exc}")
+        analyst_block = analyst_revisions.summarize([])
+
+    return {
+        "ticker": ticker,
+        "depth": "full",
+        "insider_trades": insider_block,
+        "next_earnings": events_block["next_earnings"],
+        "upcoming_events": events_block["upcoming_events"],
+        "analyst_activity": analyst_block,
     }

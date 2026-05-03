@@ -120,6 +120,7 @@ class TestToolSchemas:
             "get_portfolio_state", "get_signals", "get_ticker_detail",
             "open_position", "close_position", "resize_position",
             "get_trade_history",
+            "investigate_sentiment", "get_quant_detail", "get_enrichment_detail",
         }
         assert names == expected
 
