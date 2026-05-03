@@ -23,7 +23,7 @@ from src.storage.portfolio_repo import (
     portfolio_snapshot,
 )
 
-MODEL = "claude-sonnet-4-6"
+MODEL = "claude-opus-4-6"
 MAX_TOKENS = 8192
 MAX_TURNS = 20
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "portfolio_agent.txt"
