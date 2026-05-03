@@ -1,4 +1,4 @@
-# Signal Fusion Engine (SFE)
+# Claudfolio
 
 Agentic portfolio management experiment. Sentiment, quantitative, and enrichment engines feed a Claude-powered agent that autonomously manages a simulated portfolio — making allocation decisions, sizing positions, and reacting to new signals daily.
 
