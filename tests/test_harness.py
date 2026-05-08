@@ -230,6 +230,125 @@ class TestToolLoop:
         assert rows[0].run_date == ON_DATE
         assert rows[0].decisions_made == result["decisions_made"]
 
+    def test_system_prompt_uses_ephemeral_cache(self, session, env, monkeypatch):
+        """The system prompt must be sent with cache_control=ephemeral.
+
+        This is load-bearing for cost — without it, every turn re-bills the
+        full system prompt. Easy to break silently in a refactor.
+        """
+        client = _install_fake_sdk(monkeypatch, [_text_response("ok")])
+
+        harness.run_agent(session, ON_DATE)
+
+        system_arg = client.calls[0]["system"]
+        assert isinstance(system_arg, list)
+        assert system_arg[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_mixed_tool_batch_in_one_turn(self, session, env, monkeypatch):
+        """A response with multiple tool_use blocks runs each one in order
+        and emits a trace entry per call, all sharing the same turn index."""
+        batched = FakeResponse(
+            stop_reason="tool_use",
+            content=[
+                FakeBlock(type="tool_use", name="get_portfolio_state", input={}, id="t1"),
+                FakeBlock(
+                    type="tool_use",
+                    name="open_position",
+                    input={
+                        "ticker": "NVDA",
+                        "direction": "long",
+                        "allocation_pct": 5.0,
+                        "reasoning": "go",
+                    },
+                    id="t2",
+                ),
+            ],
+        )
+        _install_fake_sdk(monkeypatch, [batched, _text_response("done")])
+
+        result = harness.run_agent(session, ON_DATE)
+
+        tool_calls = [t for t in result["reasoning_trace"] if t["type"] == "tool_call"]
+        assert [t["tool"] for t in tool_calls] == ["get_portfolio_state", "open_position"]
+        assert {t["turn"] for t in tool_calls} == {0}
+        # Only the trade counts as a decision.
+        assert result["decisions_made"] == 1
+
+    def test_read_only_tool_does_not_increment_decisions(self, session, env, monkeypatch):
+        """get_signals etc. should not bump decisions_made even on success."""
+        scripted = [
+            _tool_response("get_signals", {}),
+            _text_response("looked, holding."),
+        ]
+        _install_fake_sdk(monkeypatch, scripted)
+
+        result = harness.run_agent(session, ON_DATE)
+
+        assert result["decisions_made"] == 0
+        assert any(
+            t["type"] == "tool_call" and t["tool"] == "get_signals"
+            for t in result["reasoning_trace"]
+        )
+
+    def test_snapshots_bracket_the_run(self, session, env, monkeypatch):
+        """snapshot_before should match starting equity; snapshot_after should
+        reflect the opened position (cash drops, total equity preserved when
+        current_price == entry_price)."""
+        scripted = [
+            _tool_response("open_position", {
+                "ticker": "NVDA",
+                "direction": "long",
+                "allocation_pct": 10.0,
+                "reasoning": "x",
+            }),
+            _text_response("done"),
+        ]
+        _install_fake_sdk(monkeypatch, scripted)
+
+        result = harness.run_agent(session, ON_DATE)
+        before, after = result["snapshot_before"], result["snapshot_after"]
+
+        assert before["equity"] == 100_000.0
+        assert before["cash"] == 100_000.0
+        assert before["position_count"] == 0
+
+        # 10% of 100k @ $100 → 100 shares → $10k position cost.
+        assert after["position_count"] == 1
+        assert after["cash"] == pytest.approx(90_000.0)
+        # Same price means equity is unchanged.
+        assert after["equity"] == pytest.approx(100_000.0)
+
+    def test_return_value_has_expected_keys(self, session, env, monkeypatch):
+        _install_fake_sdk(monkeypatch, [_text_response("ok")])
+
+        result = harness.run_agent(session, ON_DATE)
+
+        assert set(result.keys()) == {
+            "run_date",
+            "decisions_made",
+            "snapshot_before",
+            "snapshot_after",
+            "reasoning_trace",
+            "model",
+        }
+        assert result["run_date"] == ON_DATE.isoformat()
+
+    def test_text_without_end_turn_records_message(self, session, env, monkeypatch):
+        """Response with text but no tool_use and stop_reason != end_turn
+        should record a ``message`` trace entry (distinct from final_message)
+        before breaking the loop."""
+        odd = FakeResponse(
+            stop_reason="max_tokens",
+            content=[FakeBlock(type="text", text="ran out of tokens mid-thought")],
+        )
+        _install_fake_sdk(monkeypatch, [odd])
+
+        result = harness.run_agent(session, ON_DATE)
+
+        types = [t["type"] for t in result["reasoning_trace"]]
+        assert "message" in types
+        assert "final_message" not in types
+
 
 # ─────────────────────────── Helpers ─────────────────────────── #
 
