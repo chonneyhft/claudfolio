@@ -27,8 +27,11 @@ from sqlalchemy.orm import Session
 
 from src.agent.tools import TOOL_SCHEMAS as PORTFOLIO_TOOL_SCHEMAS
 from src.agent.tools import ToolContext, execute_tool
+from src.bootstrap import load_env
 from src.storage.db import get_session
 from src.storage.portfolio_repo import get_or_create_portfolio, portfolio_snapshot
+
+load_env()
 
 
 # ---------------------------------------------------------------------------

@@ -173,11 +173,11 @@ class SFEApp(App):
             log.write(renderer.render_progress_step(f"Done ({rtype})", "ok"))
 
     def _get_session(self):
-        from dotenv import load_dotenv
+        from src.bootstrap import load_env
         from src.storage.db import get_engine, get_session
         from src.storage.models import Base
 
-        load_dotenv()
+        load_env()
         engine = get_engine()
         db_path = engine.url.database
         if db_path and db_path != ":memory:":

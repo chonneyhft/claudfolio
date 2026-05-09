@@ -16,7 +16,6 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
@@ -47,7 +46,9 @@ def _init_db() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    load_dotenv()
+    from src.bootstrap import load_env
+
+    load_env()
     _init_db()
     yield
 

@@ -8,8 +8,9 @@ from datetime import date as Date
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
 from loguru import logger
+
+from src.bootstrap import load_env
 
 
 # ---------------------------------------------------------------------------
@@ -19,7 +20,7 @@ from loguru import logger
 
 def _bootstrap_db():
     """Load env, create DB dir if needed, run CREATE TABLE, return session."""
-    load_dotenv()
+    load_env()
 
     from src.storage.db import get_engine, get_session
     from src.storage.models import Base
