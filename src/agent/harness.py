@@ -2,6 +2,11 @@
 
 Feeds engine outputs to Claude, lets it call portfolio tools, and logs
 the full decision trace.
+
+LEGACY: this standalone harness is preserved as a fallback. The primary
+interface is now the MCP server in src/mcp_server/server.py, which exposes
+the same portfolio tools (plus engine and tracking tools) over stdio for
+any MCP-capable client.
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ from src.storage.portfolio_repo import (
     portfolio_snapshot,
 )
 
-MODEL = "claude-opus-4-6"
+MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 8192
 MAX_TURNS = 20
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "portfolio_agent.txt"

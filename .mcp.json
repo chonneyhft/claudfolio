@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sfe": {
+      "command": "uv",
+      "args": ["run", "sfe-mcp"]
+    }
+  }
+}

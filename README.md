@@ -38,12 +38,37 @@ cp .env.example .env
 # 3. Run all signal engines for the watchlist
 uv run sfe run-signals
 
-# 4. Let the agent manage the portfolio
-uv run sfe run-agent
+# 4. Drive the engines + portfolio from any MCP-capable client (recommended)
+#    Claude Code auto-discovers .mcp.json at the repo root.
+uv run sfe-mcp        # smoke test the server (Ctrl-C to exit)
 
 # 5. View the dashboard
 uv run sfe-dashboard
 ```
+
+## MCP server (primary interface)
+
+The Signal Fusion Engine exposes its capabilities as an MCP (Model Context
+Protocol) server over stdio. Any MCP-capable agent — Claude Code, Claude
+Desktop, or a custom client — can drive the engines, manage the simulated
+portfolio, and query tracking history through tool calls.
+
+Tools exposed:
+
+- **Engines:** `sentiment_aggregate`, `quant_aggregate`, `enrichment_aggregate`, `earnings_calendar`, `run_signals`
+- **Portfolio:** `get_portfolio_state`, `get_signals`, `get_ticker_detail`, `open_position`, `close_position`, `resize_position`, `get_trade_history`, `investigate_sentiment`, `get_quant_detail`, `get_enrichment_detail`
+- **Tracking:** `score_signals`, `get_ticker_summary`, `list_recent_signals`, `get_latest_outcome`
+
+The repo ships a `.mcp.json` file so Claude Code picks the server up
+automatically when the project directory is opened. Approve it once via
+`/mcp` and the tools become available in-session.
+
+## Legacy standalone agent
+
+The original tool-use harness in `src/agent/harness.py` is preserved for
+reference and remains runnable via `uv run sfe run-agent`. It and the MCP
+server share the same tool implementations in `src/agent/tools.py`, so both
+stay in sync. New work should target the MCP server.
 
 ## What it does
 
