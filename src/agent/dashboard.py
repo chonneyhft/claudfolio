@@ -7,6 +7,7 @@ from datetime import date, timedelta
 import streamlit as st
 import plotly.graph_objects as go
 from sqlalchemy import select, func
+from streamlit_autorefresh import st_autorefresh
 
 from src.storage.db import get_engine, get_session
 from src.storage.models import (
@@ -68,6 +69,16 @@ st.set_page_config(
 )
 
 st.title("SFE Agent Dashboard")
+
+with st.sidebar:
+    st.subheader("Auto-refresh")
+    auto_refresh = st.toggle("Enable", value=False, key="auto_refresh_enabled")
+    interval_sec = st.slider(
+        "Interval (seconds)", min_value=10, max_value=300, value=30, step=5,
+        disabled=not auto_refresh,
+    )
+if auto_refresh:
+    st_autorefresh(interval=interval_sec * 1000, key="dashboard_autorefresh")
 
 session = _get_session()
 
