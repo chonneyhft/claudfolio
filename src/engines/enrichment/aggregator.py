@@ -1,8 +1,6 @@
 """End-to-end enrichment rollup for one ticker on one day.
 
-Phase 3 starting slice: insider trades, earnings calendar, analyst
-revisions. Short interest / congressional / options flow / FOMC+CPI
-macro events slot in later.
+Covers insider trades, earnings calendar, and analyst revisions.
 """
 
 from __future__ import annotations
