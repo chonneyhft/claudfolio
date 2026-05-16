@@ -119,3 +119,16 @@ class TradeView(BaseModel):
 
 class TradeHistory(BaseModel):
     trades: list[TradeView]
+
+
+class EquityPoint(BaseModel):
+    as_of: date
+    equity: float
+    cash: float
+    positions_value: float
+
+
+class PortfolioHistory(BaseModel):
+    starting_equity: float
+    inception_date: date
+    points: list[EquityPoint]

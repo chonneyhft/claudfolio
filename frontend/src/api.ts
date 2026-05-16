@@ -1,6 +1,7 @@
 import type {
   BriefingView,
   PipelineRunResponse,
+  PortfolioHistory,
   PortfolioView,
   TickerHistory,
   TickerSnapshot,
@@ -53,6 +54,8 @@ export const api = {
     request<BriefingView>(`/briefing/${date}`),
 
   portfolio: () => request<PortfolioView>("/portfolio"),
+
+  portfolioHistory: () => request<PortfolioHistory>("/portfolio/history"),
 
   trades: (limit = 50) =>
     request<TradeHistory>(`/trades?limit=${limit}`),

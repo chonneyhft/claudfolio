@@ -301,6 +301,178 @@ def get_portfolio(session: Session = Depends(get_db)) -> schemas.PortfolioView:
     )
 
 
+@app.get("/portfolio/history", response_model=schemas.PortfolioHistory)
+def get_portfolio_history(
+    session: Session = Depends(get_db),
+) -> schemas.PortfolioHistory:
+    """Daily equity curve from inception, reconstructed by replaying trades
+    against ``QuantDaily`` closes. Resize signs are solved against close-trade
+    and current-position anchors."""
+    from src.storage.models import QuantDaily, Trade
+    from src.storage.portfolio_repo import get_or_create_portfolio, get_positions
+
+    portfolio = get_or_create_portfolio(
+        session, name="default", starting_equity=100_000.0, inception_date=Date.today()
+    )
+
+    trades = list(
+        session.execute(
+            select(Trade)
+            .where(Trade.portfolio_id == portfolio.id)
+            .order_by(Trade.trade_date, Trade.created_at)
+        ).scalars().all()
+    )
+    if not trades:
+        return schemas.PortfolioHistory(
+            starting_equity=portfolio.starting_equity,
+            inception_date=portfolio.inception_date,
+            points=[],
+        )
+
+    current_shares = {p.ticker: p.shares for p in get_positions(session, portfolio.id)}
+
+    # Resolve resize signs per ticker so we can replay trades exactly.
+    from collections import defaultdict
+
+    by_ticker: dict[str, list[Trade]] = defaultdict(list)
+    for t in trades:
+        by_ticker[t.ticker].append(t)
+
+    signed_delta: dict[int, float] = {}
+    for ticker, t_list in by_ticker.items():
+        running = 0.0
+        pending: list[Trade] = []
+
+        def solve(pending: list[Trade], start: float, target: float) -> None:
+            n = len(pending)
+            need = target - start
+            for mask in range(1 << n):
+                s = 0.0
+                for i in range(n):
+                    sign = 1.0 if (mask >> i) & 1 else -1.0
+                    s += sign * pending[i].shares
+                if abs(s - need) < 1e-3:
+                    for i in range(n):
+                        sign = 1.0 if (mask >> i) & 1 else -1.0
+                        signed_delta[pending[i].id] = sign * pending[i].shares
+                    return
+            # Fallback: assume decreases (matches observed agent behavior).
+            for p in pending:
+                signed_delta[p.id] = -p.shares
+
+        for t in t_list:
+            if t.action == "open":
+                if pending:
+                    solve(pending, running, 0.0)
+                    pending = []
+                running = t.shares
+            elif t.action == "close":
+                solve(pending, running, t.shares)
+                pending = []
+                running = 0.0
+            else:  # resize
+                pending.append(t)
+        if pending:
+            solve(pending, running, current_shares.get(ticker, 0.0))
+
+    # Build per-ticker price series indexed by date.
+    tickers = list(by_ticker.keys())
+    price_rows = session.execute(
+        select(QuantDaily.ticker, QuantDaily.as_of, QuantDaily.close)
+        .where(QuantDaily.ticker.in_(tickers))
+        .order_by(QuantDaily.ticker, QuantDaily.as_of)
+    ).all()
+    prices: dict[str, list[tuple[Date, float]]] = defaultdict(list)
+    for ticker, as_of, close in price_rows:
+        if close is not None:
+            prices[ticker].append((as_of, float(close)))
+
+    def price_on_or_before(ticker: str, day: Date) -> float | None:
+        series = prices.get(ticker, [])
+        last: float | None = None
+        for d, c in series:
+            if d > day:
+                break
+            last = c
+        return last
+
+    # Determine date range: inception → latest QuantDaily date across held tickers.
+    inception = portfolio.inception_date
+    latest_price_date: Date | None = None
+    for series in prices.values():
+        if series:
+            d = series[-1][0]
+            if latest_price_date is None or d > latest_price_date:
+                latest_price_date = d
+    if latest_price_date is None:
+        latest_price_date = inception
+    end_date = max(latest_price_date, max(t.trade_date for t in trades))
+
+    # Replay trades and snapshot equity each day.
+    cash = portfolio.starting_equity
+    positions: dict[str, tuple[str, float]] = {}  # ticker -> (direction, shares)
+    trade_idx = 0
+    points: list[schemas.EquityPoint] = []
+
+    day = inception
+    while day <= end_date:
+        while trade_idx < len(trades) and trades[trade_idx].trade_date <= day:
+            t = trades[trade_idx]
+            if t.action == "open":
+                if t.direction == "long":
+                    cash -= t.shares * t.price
+                else:
+                    cash += t.shares * t.price
+                positions[t.ticker] = (t.direction, t.shares)
+            elif t.action == "close":
+                if t.direction == "long":
+                    cash += t.shares * t.price
+                else:
+                    cash -= t.shares * t.price
+                positions.pop(t.ticker, None)
+            else:  # resize
+                delta = signed_delta.get(t.id, 0.0)
+                cur = positions.get(t.ticker)
+                if cur is not None:
+                    direction, shares = cur
+                    new_shares = max(shares + delta, 0.0)
+                    if direction == "long":
+                        cash -= delta * t.price
+                    else:
+                        cash += delta * t.price
+                    if new_shares <= 1e-6:
+                        positions.pop(t.ticker, None)
+                    else:
+                        positions[t.ticker] = (direction, new_shares)
+            trade_idx += 1
+
+        pos_value = 0.0
+        for ticker, (direction, shares) in positions.items():
+            close = price_on_or_before(ticker, day)
+            if close is None:
+                continue
+            if direction == "long":
+                pos_value += shares * close
+            else:
+                pos_value -= shares * close
+
+        points.append(
+            schemas.EquityPoint(
+                as_of=day,
+                equity=round(cash + pos_value, 2),
+                cash=round(cash, 2),
+                positions_value=round(pos_value, 2),
+            )
+        )
+        day = day + timedelta(days=1)
+
+    return schemas.PortfolioHistory(
+        starting_equity=portfolio.starting_equity,
+        inception_date=inception,
+        points=points,
+    )
+
+
 @app.get("/trades", response_model=schemas.TradeHistory)
 def get_trades_route(
     limit: int = Query(default=50, ge=1, le=500),

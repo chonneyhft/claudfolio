@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import type { PortfolioView } from "../types";
+import type { PortfolioHistory, PortfolioView } from "../types";
 import { fmtMoney, fmtNum, pnlClass, signedPct } from "../util";
 import { ErrorBox, Loader } from "../components/Loader";
+import { AllocationChart } from "../components/AllocationChart";
+import { EquityCurve } from "../components/EquityCurve";
 
 export default function Portfolio() {
   const [data, setData] = useState<PortfolioView | null>(null);
+  const [history, setHistory] = useState<PortfolioHistory | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
 
@@ -14,7 +17,12 @@ export default function Portfolio() {
     setLoading(true);
     setError(null);
     try {
-      setData(await api.portfolio());
+      const [view, hist] = await Promise.all([
+        api.portfolio(),
+        api.portfolioHistory().catch(() => null),
+      ]);
+      setData(view);
+      setHistory(hist);
     } catch (e) {
       setError(e);
     } finally {
@@ -49,6 +57,21 @@ export default function Portfolio() {
         />
         <Kpi label="Cash" value={fmtMoney(data.cash)} />
         <Kpi label="Positions" value={String(data.position_count)} />
+      </div>
+
+      {history && history.points.length > 0 ? (
+        <div className="card">
+          <h3 style={{ marginBottom: "0.75rem" }}>Equity</h3>
+          <EquityCurve
+            points={history.points}
+            startingEquity={history.starting_equity}
+          />
+        </div>
+      ) : null}
+
+      <div className="card">
+        <h3 style={{ marginBottom: "0.75rem" }}>Allocation</h3>
+        <AllocationChart cash={data.cash} positions={data.positions} />
       </div>
 
       <div className="card">

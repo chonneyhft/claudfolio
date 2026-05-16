@@ -116,3 +116,16 @@ export interface TradeView {
 export interface TradeHistory {
   trades: TradeView[];
 }
+
+export interface EquityPoint {
+  as_of: string;
+  equity: number;
+  cash: number;
+  positions_value: number;
+}
+
+export interface PortfolioHistory {
+  starting_equity: number;
+  inception_date: string;
+  points: EquityPoint[];
+}
