@@ -4,6 +4,8 @@ Agentic portfolio management experiment. Sentiment, quantitative, and enrichment
 
 **Research question:** Can an LLM agent, given structured market signals and full discretion over a simulated book, manage a portfolio at a level of competence comparable to a human?
 
+The agent operates under the strategy framework in [STRATEGY.md](./STRATEGY.md) — mandate, benchmark (QQQ), net-long band (70-85%), three-tier position sizing, kill rules (-15% hard / -10% trailing / thesis-break, -7% defensive / -10% kill at the portfolio level), and weekly review cadence. Update STRATEGY.md when the strategy evolves; do not let practice drift from documentation.
+
 ```
 $ uv run sfe run-agent
 
@@ -21,11 +23,10 @@ $ uv run sfe run-agent
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/samwise-k/claudfolio.git
+git clone https://github.com/chonneyhft/claudfolio.git
 cd claudfolio
-uv sync
-uv sync --group quant       # yfinance (options-implied move)
-uv sync --group llm         # anthropic SDK (Claude agent)
+uv sync                     # pulls dev + llm groups by default
+uv sync --group quant       # yfinance + scipy + sklearn/xgboost
 uv sync --group dashboard   # streamlit + plotly (agent dashboard)
 
 # 2. Configure API keys
@@ -107,7 +108,7 @@ The agent has near-full discretion. There are minimal guardrails — the experim
 | `sfe run-signals` | Run all 3 engines for the full watchlist (no Claude call) |
 | `sfe-dashboard` | Launch the Streamlit portfolio dashboard |
 
-`run-agent` accepts `--date`, `--model` (default: claude-sonnet-4-6), `--portfolio` (default: default), and `--starting-equity` (default: 100000).
+`run-agent` accepts `--date`, `--model` (default: claude-opus-4-6), `--portfolio` (default: default), and `--starting-equity` (default: 100000).
 
 ### Engines
 
@@ -180,7 +181,7 @@ npm run dev       # Vite dev server on :5173, proxies /api to 127.0.0.1:8000
 ### Tests
 
 ```bash
-uv run pytest               # 199 tests, ~4 seconds
+uv run pytest               # ~300 tests across engines, harness, API, storage, and frontend smoke
 ```
 
 ## Layout
@@ -188,7 +189,8 @@ uv run pytest               # 199 tests, ~4 seconds
 ```
 config/      # watchlist.yaml, sources.yaml
 src/
-  agent/           # agentic harness, tools, system prompt, Streamlit dashboard
+  agent/           # agentic harness, tools, system prompt, sub-agents, Streamlit dashboard
+  mcp_server/      # MCP stdio server (`sfe-mcp` entry) — primary agent interface
   engines/
     sentiment/     # news, SEC → score → aggregate
     quantitative/  # OHLCV, technicals, sector-relative, health score
@@ -197,10 +199,15 @@ src/
   meta/            # payload builder, Claude client, formatter, prompt templates
   api/             # FastAPI app, Pydantic schemas, `sfe-api` entry
   storage/         # SQLAlchemy models, repos, session (portfolio, positions, trades)
+  tracking/        # signal scorer + experiment dashboard
+  tui/             # Textual TUI (optional)
+  delivery/        # email + Slack delivery helpers
   pipeline.py      # CLI entry point (all `sfe` commands)
-frontend/    # React + Vite + TS dashboard (secondary)
-tests/       # 199 tests
+frontend/    # React + Vite + TS dashboard (Briefing, Watchlist, TickerDetail, Portfolio, Trades)
+tests/       # ~300 tests
 data/        # raw/ + processed/ (gitignored)
+STRATEGY.md  # authoritative trading framework — read before trading
+AGENTS.md    # per-repo agent-skill configuration
 ```
 
 ## Disclaimer
