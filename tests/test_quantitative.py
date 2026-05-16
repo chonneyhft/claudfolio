@@ -41,14 +41,14 @@ def _series(closes: list[float], volumes: list[int] | None = None) -> list[dict]
 
 
 class TestFetchOhlcvAsOfContract:
-    def test_fetch_ohlcv_excludes_as_of_bar(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """as_of contract: the as_of bar itself must NOT be returned."""
+    def test_fetch_ohlcv_includes_as_of_bar(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """as_of contract: the as_of bar must be returned when present."""
         captured: dict = {}
 
         def fake_download(ticker: str, **kwargs) -> pd.DataFrame:
             captured.update(kwargs)
             idx = pd.to_datetime(
-                ["2024-06-12", "2024-06-13", "2024-06-14"]
+                ["2024-06-13", "2024-06-14", "2024-06-17"]
             )
             return pd.DataFrame(
                 {
@@ -64,15 +64,11 @@ class TestFetchOhlcvAsOfContract:
         monkeypatch.setattr(price_fetcher.yf, "download", fake_download)
         rows = price_fetcher.fetch_ohlcv("AAPL", date(2024, 6, 17))
 
-        # end argument passed to yfinance must equal as_of itself (exclusive),
-        # not as_of + 1 day.
-        assert captured["end"] == "2024-06-17"
+        # end is exclusive in yfinance, so to include the as_of bar we pass
+        # as_of + 1 day.
+        assert captured["end"] == "2024-06-18"
         assert rows, "expected non-empty OHLCV history"
-        last_bar = rows[-1]["date"]
-        assert last_bar < date(2024, 6, 17), (
-            f"look-ahead bias: latest bar {last_bar} should be < as_of"
-        )
-        assert last_bar == date(2024, 6, 14)
+        assert rows[-1]["date"] == date(2024, 6, 17)
 
 
 class TestComputeIndicators:
