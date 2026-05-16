@@ -5,7 +5,7 @@ import { ErrorBox, Loader } from "./Loader";
 describe("Loader", () => {
   test("default label", () => {
     render(<Loader />);
-    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    expect(screen.getByText("Loading")).toBeInTheDocument();
   });
 
   test("custom label", () => {

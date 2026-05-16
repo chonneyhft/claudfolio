@@ -238,6 +238,99 @@ def ticker_history(
     }
 
 
+# ───────────────────────────── Portfolio ──────────────────────────── #
+
+
+def _fetch_current_prices(tickers: list[str]) -> dict[str, float]:
+    """Best-effort live price snapshot. Empty dict if yfinance is unavailable
+    or every lookup fails — callers fall back to last-known prices."""
+    try:
+        import yfinance as yf
+    except ImportError:
+        return {}
+    prices: dict[str, float] = {}
+    for ticker in tickers:
+        try:
+            info = yf.Ticker(ticker).fast_info
+            price = getattr(info, "last_price", None) or getattr(info, "previous_close", None)
+            if price is not None:
+                prices[ticker] = float(price)
+        except Exception:
+            pass
+    return prices
+
+
+@app.get("/portfolio", response_model=schemas.PortfolioView)
+def get_portfolio(session: Session = Depends(get_db)) -> schemas.PortfolioView:
+    from src.storage.portfolio_repo import (
+        get_or_create_portfolio,
+        get_positions,
+        portfolio_snapshot,
+    )
+
+    portfolio = get_or_create_portfolio(
+        session,
+        name="default",
+        starting_equity=100_000.0,
+        inception_date=Date.today(),
+    )
+    tickers = [p.ticker for p in get_positions(session, portfolio.id)]
+    prices = _fetch_current_prices(tickers) if tickers else {}
+    snap = portfolio_snapshot(session, portfolio, prices)
+    return schemas.PortfolioView(
+        name=snap["name"],
+        inception_date=Date.fromisoformat(snap["inception_date"]),
+        starting_equity=snap["starting_equity"],
+        cash=snap["cash"],
+        equity=snap["equity"],
+        total_return_pct=snap["total_return_pct"],
+        position_count=snap["position_count"],
+        positions=[
+            schemas.PositionView(
+                ticker=p["ticker"],
+                direction=p["direction"],
+                shares=p["shares"],
+                entry_price=p["entry_price"],
+                current_price=p["current_price"],
+                unrealized_pnl=p["unrealized_pnl"],
+                entry_date=Date.fromisoformat(p["entry_date"]),
+                reasoning=p.get("reasoning", "") or "",
+            )
+            for p in snap["positions"]
+        ],
+    )
+
+
+@app.get("/trades", response_model=schemas.TradeHistory)
+def get_trades_route(
+    limit: int = Query(default=50, ge=1, le=500),
+    session: Session = Depends(get_db),
+) -> schemas.TradeHistory:
+    from src.storage.portfolio_repo import get_or_create_portfolio, get_trades
+
+    portfolio = get_or_create_portfolio(
+        session,
+        name="default",
+        starting_equity=100_000.0,
+        inception_date=Date.today(),
+    )
+    trades = get_trades(session, portfolio.id, limit=limit)
+    return schemas.TradeHistory(
+        trades=[
+            schemas.TradeView(
+                ticker=t.ticker,
+                action=t.action,
+                direction=t.direction,
+                shares=t.shares,
+                price=t.price,
+                trade_date=t.trade_date,
+                reasoning=t.reasoning or "",
+            )
+            for t in trades
+        ]
+    )
+
+
 @app.get("/briefing/{on_date}", response_model=schemas.BriefingView)
 def get_briefing(on_date: Date, session: Session = Depends(get_db)) -> schemas.BriefingView:
     row = session.execute(

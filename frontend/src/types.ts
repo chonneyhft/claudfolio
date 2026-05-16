@@ -80,3 +80,39 @@ export interface TickerHistory {
   sentiment: TickerHistoryPoint[];
   quant: TickerHistoryPoint[];
 }
+
+export interface PositionView {
+  ticker: string;
+  direction: "long" | "short";
+  shares: number;
+  entry_price: number;
+  current_price: number;
+  unrealized_pnl: number;
+  entry_date: string;
+  reasoning: string;
+}
+
+export interface PortfolioView {
+  name: string;
+  inception_date: string;
+  starting_equity: number;
+  cash: number;
+  equity: number;
+  total_return_pct: number;
+  position_count: number;
+  positions: PositionView[];
+}
+
+export interface TradeView {
+  ticker: string;
+  action: "open" | "close" | "resize";
+  direction: "long" | "short";
+  shares: number;
+  price: number;
+  trade_date: string;
+  reasoning: string;
+}
+
+export interface TradeHistory {
+  trades: TradeView[];
+}

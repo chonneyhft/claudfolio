@@ -80,3 +80,42 @@ class PipelineRunResponse(BaseModel):
     tickers: list[str]
     as_of: date
     detail: str | None = None
+
+
+# ─────────────────────────── Portfolio ─────────────────────────────── #
+
+
+class PositionView(BaseModel):
+    ticker: str
+    direction: str
+    shares: float
+    entry_price: float
+    current_price: float
+    unrealized_pnl: float
+    entry_date: date
+    reasoning: str = ""
+
+
+class PortfolioView(BaseModel):
+    name: str
+    inception_date: date
+    starting_equity: float
+    cash: float
+    equity: float
+    total_return_pct: float
+    position_count: int
+    positions: list[PositionView]
+
+
+class TradeView(BaseModel):
+    ticker: str
+    action: str
+    direction: str
+    shares: float
+    price: float
+    trade_date: date
+    reasoning: str = ""
+
+
+class TradeHistory(BaseModel):
+    trades: list[TradeView]

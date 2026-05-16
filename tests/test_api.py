@@ -156,3 +156,73 @@ def test_briefing_miss(client: TestClient) -> None:
 def test_pipeline_unknown_engine(client: TestClient) -> None:
     r = client.post("/pipeline/bogus", params={"ticker": "LMT"})
     assert r.status_code == 404
+
+
+def test_portfolio_empty(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(api_main, "_fetch_current_prices", lambda _: {})
+    r = client.get("/portfolio")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "default"
+    assert body["starting_equity"] == 100_000.0
+    assert body["cash"] == 100_000.0
+    assert body["equity"] == 100_000.0
+    assert body["total_return_pct"] == 0.0
+    assert body["positions"] == []
+    assert body["position_count"] == 0
+
+
+def test_portfolio_with_position(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.storage.portfolio_repo import get_or_create_portfolio, open_position
+
+    monkeypatch.setattr(api_main, "_fetch_current_prices", lambda _: {"LMT": 500.0})
+
+    with api_main._session_factory()() as s:
+        pf = get_or_create_portfolio(s, name="default", starting_equity=100_000.0)
+        open_position(
+            s, pf, "LMT", "long", shares=10.0, price=480.0,
+            trade_date=date(2026, 4, 15), reasoning="test entry",
+        )
+
+    r = client.get("/portfolio")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["position_count"] == 1
+    pos = body["positions"][0]
+    assert pos["ticker"] == "LMT"
+    assert pos["direction"] == "long"
+    assert pos["shares"] == 10.0
+    assert pos["entry_price"] == 480.0
+    assert pos["current_price"] == 500.0
+    assert pos["unrealized_pnl"] == 200.0
+
+
+def test_trades_empty(client: TestClient) -> None:
+    r = client.get("/trades")
+    assert r.status_code == 200
+    assert r.json() == {"trades": []}
+
+
+def test_trades_with_history(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.storage.portfolio_repo import get_or_create_portfolio, open_position
+
+    monkeypatch.setattr(api_main, "_fetch_current_prices", lambda _: {})
+
+    with api_main._session_factory()() as s:
+        pf = get_or_create_portfolio(s, name="default", starting_equity=100_000.0)
+        open_position(
+            s, pf, "LMT", "long", shares=5.0, price=475.0,
+            trade_date=date(2026, 4, 14), reasoning="initial buy",
+        )
+
+    r = client.get("/trades", params={"limit": 5})
+    assert r.status_code == 200
+    trades = r.json()["trades"]
+    assert len(trades) == 1
+    assert trades[0]["ticker"] == "LMT"
+    assert trades[0]["action"] == "open"
+    assert trades[0]["reasoning"] == "initial buy"

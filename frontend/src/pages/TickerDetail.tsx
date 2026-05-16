@@ -36,7 +36,7 @@ export default function TickerDetail() {
   return (
     <>
       <p className="muted">
-        <Link to="/">← Watchlist</Link>
+        <Link to="/watchlist">← Watchlist</Link>
       </p>
       <h1>
         {snap.ticker}{" "}

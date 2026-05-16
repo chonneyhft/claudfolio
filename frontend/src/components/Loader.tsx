@@ -1,5 +1,9 @@
-export function Loader({ label = "Loading…" }: { label?: string }) {
-  return <p className="muted">{label}</p>;
+export function Loader({ label = "Loading" }: { label?: string }) {
+  return (
+    <span className="loader" role="status">
+      {label}
+    </span>
+  );
 }
 
 export function ErrorBox({ error }: { error: unknown }) {
