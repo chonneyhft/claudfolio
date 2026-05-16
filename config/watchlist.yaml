@@ -48,3 +48,21 @@ tickers:
   - ticker: MA
     sector: financials
     notes: "Mastercard"
+  - ticker: AMD
+    sector: technology
+    notes: "Semis breadth beyond NVDA/AVGO"
+  - ticker: TSM
+    sector: technology
+    notes: "Taiwan Semi — semis + international exposure"
+  - ticker: GE
+    sector: industrials
+    notes: "Aerospace + power; first industrials name"
+  - ticker: UNH
+    sector: healthcare
+    notes: "Managed care — healthcare breadth beyond LLY"
+  - ticker: CVX
+    sector: energy
+    notes: "Integrated energy — energy breadth beyond XOM"
+  - ticker: COST
+    sector: consumer-staples
+    notes: "Defensive quality — staples breadth beyond WMT"
