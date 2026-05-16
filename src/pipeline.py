@@ -339,6 +339,26 @@ def cmd_run_agent(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_prune(args: argparse.Namespace) -> int:
+    from src.core import prune_old_data
+
+    session = _bootstrap_db()
+    try:
+        counts = prune_old_data(session, dry_run=args.dry_run)
+    finally:
+        session.close()
+
+    verb = "would delete" if args.dry_run else "deleted"
+    total = sum(counts.values())
+    if not total:
+        print(f"Nothing to prune ({verb} 0 rows).")
+        return 0
+    for table, n in counts.items():
+        print(f"  {table}: {verb} {n} rows")
+    print(f"Total: {verb} {total} rows")
+    return 0
+
+
 def run_all(args: argparse.Namespace) -> int:
     logger.info("full pipeline: not yet implemented")
     return 0
@@ -441,6 +461,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_agent.add_argument("--portfolio", default="default", help="Portfolio name (default: default)")
     p_agent.add_argument("--starting-equity", default="100000", help="Starting equity for new portfolios (default: 100000)")
     p_agent.set_defaults(func=cmd_run_agent)
+
+    p_prune = subs.add_parser("prune", help="Delete engine rows past retention window")
+    p_prune.add_argument(
+        "--dry-run", action="store_true", help="Report counts without deleting"
+    )
+    p_prune.set_defaults(func=cmd_prune)
 
     subs.add_parser("run-all", help="Run the full pipeline end to end").set_defaults(func=run_all)
     return parser

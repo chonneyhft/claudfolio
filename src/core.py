@@ -373,7 +373,34 @@ def run_agent(
         d=result["decisions_made"],
         eq=result["snapshot_after"]["equity"],
     )
+
+    if on_date == Date.today():
+        try:
+            counts = prune_old_data(session)
+            total = sum(counts.values())
+            if total:
+                logger.info("post-agent prune: {n} rows reclaimed {c}", n=total, c=counts)
+        except Exception as exc:
+            logger.warning("post-agent prune failed (non-fatal): {exc}", exc=exc)
+
     return result
+
+
+def prune_old_data(
+    session: Session,
+    *,
+    dry_run: bool = False,
+) -> dict[str, int]:
+    """Prune engine rows past their retention window. Decision tables untouched."""
+    from src.storage.retention import prune
+
+    counts = prune(session, dry_run=dry_run)
+    logger.info(
+        "prune ({mode}): {counts}",
+        mode="dry-run" if dry_run else "applied",
+        counts=counts,
+    )
+    return counts
 
 
 def get_ticker_summary(
